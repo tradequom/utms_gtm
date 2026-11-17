@@ -1,0 +1,37 @@
+{
+  "enabled": true,
+  "sites": {
+    "my.tradequo.com": {
+      "enabled": true,
+      "pages": [
+        {
+          "name": "Регистрация",
+          "path": "/auth/sign-up",
+          "enabled": true,
+          "countries": ["ZA", "BR", "PH", "AU", "ID"],
+          "addParams": { "utm_source": "mkt_website" }
+        }
+      ]
+    },
+    "my.quomarkets.com": {
+      "enabled": true,
+      "pages": [
+        {
+          "name": "Регистрация",
+          "path": "/auth/sign-up",
+          "enabled": true,
+          "countries": [],
+          "addParams": { "utm_source": "direct" }
+        }
+      ]
+    }
+  },
+  "skipIfParamPrefixes": ["utm_"],
+  "skipIfParams": [
+    "referral", "ref", "reg", "regnew", "new",
+    "gclid", "gbraid", "wbraid", "dclid", "fbclid", "msclkid",
+    "ttclid", "twclid", "li_fat_id", "yclid", "tradingview_uid", "roistat_visit"
+  ],
+  "skipIfLocalStorageKeys": ["IB_CLICK_TOKEN", "REFERRAL_QUERY_PARAM_NAME"],
+  "geoTimeoutMs": 2000
+}

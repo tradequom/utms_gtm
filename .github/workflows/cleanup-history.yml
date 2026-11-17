@@ -1,0 +1,98 @@
+name: Очистка истории (разово)
+
+# Run once by hand (Actions → this workflow → Run workflow), then delete this file.
+# 1. Replaces the whole history of main with one commit holding the current files
+#    (without README.md and tools/).
+# 2. Publishes the script again and waits until it is live.
+# 3. Deletes all earlier Actions runs (with their logs) and old Pages deployment records.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+  deployments: write
+
+concurrency:
+  group: cleanup-history
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Заменить историю одним коммитом
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q --orphan clean
+          for p in README.md tools upload-these-files utms_gtm_update; do
+            git rm -r -q --cached --ignore-unmatch "$p"
+            rm -rf "$p"
+          done
+          git add -A
+          git commit -q -m "utm-direct"
+          git push --force origin clean:main
+          echo "История main заменена одним коммитом $(git rev-parse --short HEAD)."
+
+      - name: Опубликовать скрипт заново и дождаться публикации
+        run: |
+          start=$(date -u -d "-30 seconds" +%Y-%m-%dT%H:%M:%SZ)
+          gh workflow run deploy.yml --ref main
+          id=""
+          for i in $(seq 1 60); do
+            id=$(gh run list --workflow deploy.yml --branch main --event workflow_dispatch --limit 5 \
+                   --json databaseId,createdAt --jq "[.[] | select(.createdAt >= \"$start\")][0].databaseId // empty")
+            [ -n "$id" ] && break
+            sleep 5
+          done
+          [ -n "$id" ] || { echo "::error::Публикация не запустилась"; exit 1; }
+          echo "DEPLOY_RUN_ID=$id" >> "$GITHUB_ENV"
+          gh run watch "$id" --exit-status --interval 10 > /dev/null
+          echo "Скрипт опубликован заново."
+
+      - name: Удалить старые запуски Actions и их логи
+        run: |
+          n=0
+          for id in $(gh api --paginate "repos/$GH_REPO/actions/runs?per_page=100" --jq '.workflow_runs[].id'); do
+            if [ "$id" != "${{ github.run_id }}" ] && [ "$id" != "$DEPLOY_RUN_ID" ]; then
+              gh api -X DELETE "repos/$GH_REPO/actions/runs/$id" > /dev/null && n=$((n+1))
+            fi
+          done
+          echo "Удалено запусков: $n."
+
+      - name: Удалить старые записи о публикациях
+        continue-on-error: true
+        run: |
+          n=0
+          # Newest first: keep the deployment that was just made.
+          for id in $(gh api --paginate "repos/$GH_REPO/deployments?environment=github-pages&per_page=100" --jq '.[].id' | tail -n +2); do
+            gh api -X POST "repos/$GH_REPO/deployments/$id/statuses" -f state=inactive > /dev/null || true
+            gh api -X DELETE "repos/$GH_REPO/deployments/$id" > /dev/null && n=$((n+1))
+          done
+          echo "Удалено записей о публикациях: $n."
+
+      - name: Проверить, что скрипт доступен
+        run: |
+          owner="${GH_REPO%%/*}"; repo="${GH_REPO##*/}"
+          url="https://${owner,,}.github.io/${repo}/utm-direct.js"
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$url?nc=$RANDOM")
+            [ "$code" = "200" ] && { echo "Скрипт доступен: $url"; exit 0; }
+            sleep 10
+          done
+          echo "::error::Скрипт не отвечает ($code). Запустите «Проверка и публикация на GitHub Pages» вручную."
+          exit 1
+
+      - name: Что дальше
+        run: |
+          echo "Готово. Теперь удалите файл .github/workflows/cleanup-history.yml"
+          echo "(откройте его на github.com → значок корзины / «…» → Delete file → Commit changes)."
